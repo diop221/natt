@@ -1,0 +1,496 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooler Supabase (port 6543), utilisé par l'application
+  directUrl = env("DIRECT_URL") // connexion directe (port 5432), utilisée pour les migrations
+}
+
+// Montants : toujours en FCFA (XOF), sauf les champs `sats` des factures Lightning.
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  phone        String        @unique // format international, ex. +221771234567
+  passwordHash String
+  locale       String        @default("fr") // fr | wo
+  createdAt    DateTime      @default(now())
+  sessions     Session[]
+  tontines     Tontine[] // tontines organisées
+  memberships  Member[]      @relation("MemberUser")
+  sponsoring   Member[]      @relation("MemberSponsor")
+  orgs         OrgMember[]
+  attestations Attestation[]
+  certificates Certificate[]
+}
+
+model Session {
+  id        String   @id // empreinte SHA-256 du jeton stocké dans le cookie
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// Association (GIE, groupement, dahira) qui gère plusieurs caisses.
+model Organization {
+  id        String      @id @default(cuid())
+  name      String
+  createdAt DateTime    @default(now())
+  members   OrgMember[]
+  tontines  Tontine[]
+}
+
+model OrgMember {
+  id     String       @id @default(cuid())
+  orgId  String
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  userId String
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   String       @default("MEMBER") // ADMIN (bureau) | MEMBER
+
+  @@unique([orgId, userId])
+}
+
+model Tontine {
+  id              String              @id @default(cuid())
+  ownerId         String
+  owner           User                @relation(fields: [ownerId], references: [id])
+  orgId           String?
+  org             Organization?       @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  name            String
+  // ROTATING : chacun reçoit la cagnotte à son tour
+  // AUCTION : le tour va au plus offrant, la remise est partagée entre les autres
+  // SAVINGS : épargne, chacun récupère ses cotisations à la fin (Tabaski, rentrée…)
+  // SOLIDARITY : caisse commune, versée sur demande (décès, mariage, urgence)
+  type            String              @default("ROTATING")
+  amountXof       Int // cotisation de chaque membre, par tour
+  frequency       String // weekly | monthly
+  status          String              @default("ACTIVE") // DRAWING | ACTIVE | COMPLETED
+  currentRound    Int                 @default(1)
+  totalRounds     Int
+  startAt         DateTime            @default(now()) // échéance du tour n = startAt + n périodes
+  goalLabel       String? // épargne : objectif affiché (« Tabaski 2027 »)
+  orderMode       String              @default("MANUAL") // MANUAL | DRAW
+  drawBlockHeight Int?
+  drawBlockHash   String?
+  latePenaltyXof  Int                 @default(0)
+  guaranteeBps    Int                 @default(0) // part ajoutée à chaque cotisation pour le fonds de garantie (100 = 1 %)
+  fundXof         Int                 @default(0) // fonds de garantie, ou caisse pour SOLIDARITY
+  verifyPayouts   Boolean             @default(false) // versements bloqués tant que le numéro du bénéficiaire n'est pas vérifié
+  reserveBps      Int                 @default(0) // réserve de fin de cycle retenue sur chaque cagnotte (500 = 5 %), rendue à la fin
+  offerId         String? // Natt Marchands : achat financé par la tontine (classique ou épargne)
+  offer           Offer?              @relation(fields: [offerId], references: [id])
+  createdAt       DateTime            @default(now())
+  members         Member[]
+  rounds          Round[]
+  charges         Charge[]
+  payouts         Payout[]
+  fundEntries     FundEntry[]
+  requests        SolidarityRequest[]
+  swaps           TurnSwap[]
+  audit           AuditEntry[]
+  hands           Hand[]
+  incidents       Incident[]
+  reserveEntries  ReserveEntry[]
+  orders          Order[]
+}
+
+model Member {
+  id             String              @id @default(cuid())
+  tontineId      String
+  tontine        Tontine             @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  name           String
+  phone          String // numéro mobile money qui reçoit les versements
+  network        String // wave | orange_money | free_money | expresso
+  position       Int // ordre de passage, à partir de 1
+  userId         String? // relié au compte qui a le même numéro
+  user           User?               @relation("MemberUser", fields: [userId], references: [id], onDelete: SetNull)
+  sponsorPhone   String? // proche (souvent de la diaspora) qui cotise pour ce membre
+  sponsorUserId  String?
+  sponsor        User?               @relation("MemberSponsor", fields: [sponsorUserId], references: [id], onDelete: SetNull)
+  creditXof      Int                 @default(0) // remises d'enchères, déduites des prochaines cotisations
+  // Vérification du numéro de versement : OTP (code reçu sur WhatsApp) ou ORGANIZER
+  // (confirmé par l'organisateur quand le code ne peut pas être reçu). Remise à zéro si le numéro change.
+  verifiedAt     DateTime?
+  verifiedVia    String?
+  // Part dans une tontine classique, en demi-mains : 1 = demi-main partagée, 2 = main entière, 4 = double main.
+  halves         Int                 @default(2)
+  reserveXof     Int                 @default(0) // réserve de fin de cycle retenue sur ses cagnottes
+  voiceNotes     Boolean             @default(false) // reçoit aussi des messages vocaux en wolof
+  // Contact d'urgence et ayant droit, désignés par le membre lui-même, visibles par lui et l'organisateur.
+  emergencyName  String?
+  emergencyPhone String?
+  heirName       String?
+  heirPhone      String?
+  heirRelation   String?
+  contactsAt     DateTime?
+  suspendedAt    DateTime? // situation exceptionnelle : rappels, pénalités et versements suspendus
+  transferredAt  DateTime? // place reprise par un ayant droit : versements toujours soumis à vérification
+  contributions  Contribution[]
+  roundsWon      Round[]
+  charges        Charge[]
+  payouts        Payout[]
+  bids           Bid[]
+  requests       SolidarityRequest[]
+  otps           PhoneOtp[]
+  holdings       HandHolder[]
+  incidents      Incident[]
+  reserveEntries ReserveEntry[]
+  orders         Order[]
+  swapsAsked     TurnSwap[]          @relation("SwapRequester")
+  swapsReceived  TurnSwap[]          @relation("SwapPartner")
+  audit          AuditEntry[]
+
+  @@unique([tontineId, position])
+}
+
+model Round {
+  id            String         @id @default(cuid())
+  tontineId     String
+  tontine       Tontine        @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  number        Int
+  beneficiaryId String? // connu dès l'ouverture (ROTATING) ou à la clôture (AUCTION) ; vide pour une demi-main partagée
+  beneficiary   Member?        @relation(fields: [beneficiaryId], references: [id])
+  handId        String? // ROTATING : la main qui reçoit ce tour
+  hand          Hand?          @relation(fields: [handId], references: [id])
+  // COLLECTING → CLOSING → PAYING_OUT → DONE ; PAYOUT_FAILED en cas d'échec
+  status        String         @default("COLLECTING")
+  dueAt         DateTime
+  bidXof        Int            @default(0) // enchère gagnante
+  feeXof        Int            @default(0) // commission Natt
+  closedAt      DateTime?
+  createdAt     DateTime       @default(now())
+  contributions Contribution[]
+  bids          Bid[]
+  payouts       Payout[]
+  charges       Charge[]
+
+  @@unique([tontineId, number])
+}
+
+model Contribution {
+  id             String    @id @default(cuid())
+  roundId        String
+  round          Round     @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  memberId       String
+  member         Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  amountXof      Int // part qui compte dans la cagnotte
+  guaranteeXof   Int       @default(0) // part versée au fonds de garantie
+  creditUsedXof  Int       @default(0) // remise d'enchère déduite
+  sats           Int       @default(0)
+  invoiceId      String?
+  paymentRequest String?
+  // pending | paid | covered (avancée par le fonds de garantie)
+  status         String    @default("pending")
+  paidAt         DateTime?
+  sponsorName    String? // nom de la personne qui a payé pour le membre
+
+  @@unique([roundId, memberId])
+}
+
+// Montant dû en dehors des cotisations : pénalité de retard ou remboursement du fonds.
+model Charge {
+  id             String    @id @default(cuid())
+  tontineId      String
+  tontine        Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  memberId       String
+  member         Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  roundId        String?
+  round          Round?    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  kind           String // PENALTY | REPAYMENT
+  amountXof      Int
+  sats           Int
+  invoiceId      String
+  paymentRequest String
+  status         String    @default("pending") // pending | paid
+  paidAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@unique([roundId, memberId, kind])
+}
+
+model Payout {
+  id         String             @id @default(cuid())
+  key        String             @unique // empêche de créer deux fois le même versement
+  tontineId  String
+  tontine    Tontine            @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  roundId    String?
+  round      Round?             @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  memberId   String // membre bénéficiaire (pour un achat : le membre pour qui on paie le marchand)
+  member     Member             @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  merchantId String? // achat Natt Marchands : l'argent part chez le marchand ; feeXof est alors la commission du marchand
+  merchant   Merchant?          @relation(fields: [merchantId], references: [id])
+  requestId  String?            @unique
+  request    SolidarityRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  amountXof  Int
+  feeXof     Int                @default(0)
+  status     String             @default("PENDING") // PENDING | SENDING | PAID | FAILED
+  providerId String?
+  error      String?
+  paidAt     DateTime?
+  createdAt  DateTime           @default(now())
+}
+
+// Journal du fonds de garantie / de la caisse : chaque mouvement est visible par les membres.
+model FundEntry {
+  id        String   @id @default(cuid())
+  tontineId String
+  tontine   Tontine  @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  amountXof Int // positif = entrée, négatif = sortie
+  reason    String // GUARANTEE | PENALTY | REPAYMENT | COVER | CONTRIBUTION | REQUEST | BID_REMAINDER
+  label     String
+  createdAt DateTime @default(now())
+}
+
+model Bid {
+  id        String   @id @default(cuid())
+  roundId   String
+  round     Round    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  amountXof Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roundId, memberId])
+}
+
+model SolidarityRequest {
+  id          String    @id @default(cuid())
+  tontineId   String
+  tontine     Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  reason      String // DEATH | WEDDING | BAPTISM | HEALTH | OTHER
+  description String
+  amountXof   Int
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED | PAID
+  decidedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  payout      Payout?
+}
+
+// Messages envoyés (WhatsApp ou SMS). `key` évite d'envoyer deux fois le même rappel.
+model Notification {
+  id        String   @id @default(cuid())
+  key       String?  @unique
+  phone     String
+  channel   String // whatsapp | sms
+  body      String
+  status    String   @default("SENT") // SENT | FAILED
+  error     String?
+  createdAt DateTime @default(now())
+}
+
+// Code de vérification envoyé par WhatsApp sur le numéro de versement d'un membre.
+model PhoneOtp {
+  id        String    @id // sert aussi de sel pour l'empreinte du code
+  memberId  String
+  member    Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  codeHash  String
+  attempts  Int       @default(0)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([memberId, createdAt])
+}
+
+// Échange de tours entre deux membres d'une tontine classique : le partenaire accepte,
+// puis l'organisateur valide. Les positions sont celles du moment de la demande.
+model TurnSwap {
+  id                String    @id @default(cuid())
+  tontineId         String
+  tontine           Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  requesterId       String
+  requester         Member    @relation("SwapRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  partnerId         String
+  partner           Member    @relation("SwapPartner", fields: [partnerId], references: [id], onDelete: Cascade)
+  requesterHandId   String
+  requesterHand     Hand      @relation("SwapRequesterHand", fields: [requesterHandId], references: [id], onDelete: Cascade)
+  partnerHandId     String
+  partnerHand       Hand      @relation("SwapPartnerHand", fields: [partnerHandId], references: [id], onDelete: Cascade)
+  requesterPosition Int
+  partnerPosition   Int
+  // PENDING_PARTNER → PENDING_ORGANIZER → APPLIED ; REFUSED (partenaire), REJECTED (organisateur ou tour plus échangeable), CANCELLED
+  status            String    @default("PENDING_PARTNER")
+  answeredAt        DateTime?
+  decidedAt         DateTime?
+  createdAt         DateTime  @default(now())
+}
+
+// Main (tour de passage) d'une tontine classique. Une main entière a un seul titulaire ;
+// une demi-main en a deux, qui se partagent la cagnotte de ce tour. Un membre à double main en tient deux.
+model Hand {
+  id         String       @id @default(cuid())
+  tontineId  String
+  tontine    Tontine      @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  position   Int // numéro du tour où cette main reçoit la cagnotte
+  holders    HandHolder[]
+  rounds     Round[]
+  swapsAsked TurnSwap[]   @relation("SwapRequesterHand")
+  swapsGot   TurnSwap[]   @relation("SwapPartnerHand")
+
+  @@unique([tontineId, position])
+}
+
+model HandHolder {
+  id       String @id @default(cuid())
+  handId   String
+  hand     Hand   @relation(fields: [handId], references: [id], onDelete: Cascade)
+  memberId String
+  member   Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  halves   Int // 2 = main entière, 1 = moitié d'une main partagée
+
+  @@unique([handId, memberId])
+}
+
+// Réserve de fin de cycle : chaque retenue, utilisation et restitution, membre par membre.
+model ReserveEntry {
+  id        String   @id @default(cuid())
+  tontineId String
+  tontine   Tontine  @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  amountXof Int // positif = retenue, négatif = utilisation ou restitution
+  reason    String // HOLD | SETTLE (dettes réglées à la fin) | RELEASE
+  label     String
+  createdAt DateTime @default(now())
+}
+
+// Situation exceptionnelle (hospitalisation, incapacité, décès…) signalée pour un membre.
+// Rien n'est versé à un ayant droit sur simple déclaration : il faut un justificatif constaté
+// par l'organisateur, une décision journalisée et la vérification du numéro de l'ayant droit.
+model Incident {
+  id           String    @id @default(cuid())
+  tontineId    String
+  tontine      Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  memberId     String
+  member       Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  kind         String // HOSPITAL | INCAPACITY | DEATH | OTHER
+  description  String
+  reportedById String?
+  status       String    @default("OPEN") // OPEN | CLOSED
+  evidence     String? // justificatif constaté par l'organisateur (nature, référence), jamais le document lui-même
+  evidenceAt   DateTime?
+  decision     String? // RESUME | TRANSFER | OTHER
+  decisionNote String?
+  decidedAt    DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+// Journal horodaté des modifications d'une tontine : vérifications, changements de numéro, échanges de tours.
+model AuditEntry {
+  id        String   @id @default(cuid())
+  tontineId String
+  tontine   Tontine  @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  memberId  String?
+  member    Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  actorId   String? // compte qui a fait l'action ; vide pour Natt ou un membre sans compte
+  action    String
+  label     String
+  createdAt DateTime @default(now())
+
+  @@index([tontineId, createdAt])
+}
+
+// Lien public qui présente le score de fiabilité d'un membre, à montrer à une microfinance.
+model Attestation {
+  id        String   @id // jeton aléatoire, sert d'adresse
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+// ─── Natt Marchands ────────────────────────────────────────────────────────
+
+// Marchand partenaire, ajouté par l'équipe Natt. Son numéro de versement doit être vérifié
+// par Natt avant tout paiement.
+model Merchant {
+  id            String    @id @default(cuid())
+  name          String
+  category      String // TABASKI | FOOD | APPLIANCES | ENERGY | BUSINESS
+  description   String
+  city          String
+  phone         String // numéro qui reçoit les paiements (et les commandes par WhatsApp)
+  network       String
+  commissionBps Int // commission versée à Natt sur chaque vente (300 = 3 %)
+  verifiedAt    DateTime? // numéro de paiement vérifié par l'équipe Natt
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  offers        Offer[]
+  orders        Order[]
+  payouts       Payout[]
+}
+
+model Offer {
+  id           String    @id @default(cuid())
+  merchantId   String
+  merchant     Merchant  @relation(fields: [merchantId], references: [id])
+  title        String
+  description  String
+  category     String
+  priceXof     Int // prix public
+  nattPriceXof Int // prix pour les membres Natt (remise négociée)
+  delivery     String? // modalités de livraison ou de retrait
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  tontines     Tontine[]
+  orders       Order[]
+}
+
+// Achat réglé au marchand pour un membre, puis livré et confirmé.
+model Order {
+  id            String    @id @default(cuid())
+  token         String    @unique // lien envoyé au marchand pour indiquer la livraison
+  tontineId     String
+  tontine       Tontine   @relation(fields: [tontineId], references: [id], onDelete: Cascade)
+  memberId      String
+  member        Member    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  offerId       String
+  offer         Offer     @relation(fields: [offerId], references: [id])
+  merchantId    String
+  merchant      Merchant  @relation(fields: [merchantId], references: [id])
+  payoutKey     String    @unique // versement au marchand (voir Payout.key)
+  priceXof      Int // prix Natt payé
+  commissionXof Int
+  // PAYING → PAID (marchand payé) → DELIVERED (le marchand indique la livraison) → RECEIVED (le membre confirme)
+  status        String    @default("PAYING")
+  deliveredAt   DateTime?
+  receivedAt    DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+// ─── Attestation de régularité ─────────────────────────────────────────────
+
+// Document figé au moment de l'émission et signé (Ed25519). Le contenu signé est `payload` ;
+// n'importe qui peut vérifier la signature avec la clé publique de Natt.
+model Certificate {
+  id             String    @id // jeton aléatoire, adresse du QR code de vérification
+  number         String    @unique // référence lisible, ex. NATT-2026-7KQ4M2
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payload        Json? // contenu signé, figé à l'émission (après paiement)
+  signature      String?
+  keyId          String? // empreinte de la clé publique qui a signé
+  priceXof       Int
+  invoiceId      String?
+  paymentRequest String?
+  status         String    @default("PENDING_PAYMENT") // PENDING_PAYMENT | ISSUED | REVOKED
+  issuedAt       DateTime?
+  revokedAt      DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+}
+
+// Factures simulées, utilisées seulement quand PAYMENT_PROVIDER=mock.
+model MockInvoice {
+  id        String   @id
+  sats      Int
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+}

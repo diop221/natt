@@ -1,26 +1,273 @@
 @import "tailwindcss";
 
+/* Natt : identité Bitcoin / Lightning. Orange Bitcoin, éclair ambre, fond nuit. */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f5f1;
+  --surface: #ffffff;
+  --surface-2: #f1eee8;
+  --foreground: #14110f;
+  --muted: #6f665d;
+  --border: #e6e0d6;
+  --accent: #e97c07; /* orange Bitcoin, un peu plus sombre pour le contraste sur fond clair */
+  --accent-strong: #c46200;
+  --accent-soft: #fdebd3;
+  --bolt: #ffb020;
+  --success: #0f8a5f;
+  --success-soft: #d7f5e7;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --danger: #c22a2a;
+  --danger-soft: #fde2e2;
+  --ring: rgba(233, 124, 7, 0.35);
+  --chart: #c96800; /* série des graphiques, validée (contraste ≥ 3:1, bande de luminosité) */
+  --shadow: 0 1px 2px rgba(20, 17, 15, 0.04), 0 8px 24px -12px rgba(20, 17, 15, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --background: #07080c;
+    --surface: #10121a;
+    --surface-2: #171a24;
+    --foreground: #f4f1ec;
+    --muted: #9a958e;
+    --border: #232733;
+    --accent: #f7931a;
+    --accent-strong: #ffa940;
+    --accent-soft: rgba(247, 147, 26, 0.14);
+    --bolt: #ffc53d;
+    --success: #34d399;
+    --success-soft: rgba(52, 211, 153, 0.13);
+    --warn: #fbbf24;
+    --warn-soft: rgba(251, 191, 36, 0.12);
+    --danger: #f87171;
+    --danger-soft: rgba(248, 113, 113, 0.13);
+    --ring: rgba(247, 147, 26, 0.45);
+    --chart: #d4760e;
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -16px rgba(0, 0, 0, 0.8);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-bolt: var(--bolt);
+  --color-chart: var(--chart);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent);
+  color: #000;
+}
+
+/* ─── Composants ─────────────────────────────────────────────────────────── */
+
+@layer components {
+  .card {
+    border-radius: 1.25rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.875rem;
+    padding: 0.625rem 1.1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #160c00;
+    background: linear-gradient(135deg, #ffb547 0%, #f7931a 55%, #ec7a00 100%);
+    box-shadow: 0 8px 24px -10px rgba(247, 147, 26, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    white-space: nowrap;
+  }
+  .btn:hover {
+    filter: brightness(1.06);
+    box-shadow: 0 10px 28px -10px rgba(247, 147, 26, 0.85), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+  .btn:active {
+    transform: translateY(1px);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-lg {
+    padding: 0.85rem 1.5rem;
+    font-size: 1rem;
+    border-radius: 1rem;
+  }
+
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.875rem;
+    padding: 0.625rem 1.1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--foreground);
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .btn-ghost:hover {
+    border-color: var(--accent);
+  }
+
+  .input {
+    border-radius: 0.75rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    padding: 0.6rem 0.85rem;
+    color: var(--foreground);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
+  }
+  .input::placeholder {
+    color: var(--muted);
+  }
+
+  .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .link:hover {
+    color: var(--accent-strong);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--surface-2);
+    color: var(--muted);
+  }
+  .badge-accent {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .text-gradient {
+    background: linear-gradient(100deg, #ffd27a 0%, #f7931a 45%, #ff6a00 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Zone « nuit » : la page d'accueil reste sombre, quel que soit le thème. */
+  .night {
+    --background: #07080c;
+    --surface: #10121a;
+    --surface-2: #171a24;
+    --foreground: #f4f1ec;
+    --muted: #9a958e;
+    --border: #232733;
+    --accent: #f7931a;
+    --accent-strong: #ffa940;
+    --accent-soft: rgba(247, 147, 26, 0.14);
+    --success: #34d399;
+    --success-soft: rgba(52, 211, 153, 0.13);
+    --chart: #d4760e;
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -16px rgba(0, 0, 0, 0.8);
+    background: var(--background);
+    color: var(--foreground);
+  }
+
+  .grid-bg {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 75%);
+  }
+
+  .glow {
+    background: radial-gradient(circle, rgba(247, 147, 26, 0.35) 0%, rgba(247, 147, 26, 0) 65%);
+    filter: blur(20px);
+  }
+}
+
+@keyframes bolt-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.94);
+  }
+}
+.animate-bolt {
+  animation: bolt-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@media print {
+  header,
+  footer,
+  .print\:hidden {
+    display: none !important;
+  }
+  .card {
+    box-shadow: none;
+  }
 }

@@ -2,6 +2,20 @@
 
 La tontine sans trésorier : chaque membre cotise en Lightning, et quand tout le monde a payé, la cagnotte part automatiquement sur le Wave ou l'Orange Money du bénéficiaire, via l'API Bitnob.
 
+## Comment Natt utilise l'API Bitnob
+
+Natt ne détient jamais l'argent du groupe : chaque mouvement passe par Bitnob (`src/lib/payments/bitnob.ts`).
+
+| Étape | Appel Bitnob | Ce que fait Natt |
+|---|---|---|
+| Ouverture d'un tour | `POST /api/lightning/invoices` | Une facture Lightning par membre, montant en sats au cours du moment |
+| Cotisation | `GET /api/lightning/invoices/:id` + webhook | Marque la cotisation payée dès que la facture est réglée |
+| Tour complet : devis | `POST /api/payouts/quotes` | Devis BTC → XOF pour la cagnotte (moins la commission Natt), corridor Sénégal |
+| Versement | `POST /api/payouts/:quote_id/initialize` puis `/finalize` | Envoi sur le Wave, l'Orange Money, Free Money ou Expresso du bénéficiaire |
+| Règlement | `GET /api/payouts/:id` + webhook `/api/webhooks/bitnob` | Le versement reste « en cours » jusqu'à la confirmation de l'opérateur : jamais d'envoi en double |
+
+Les requêtes sont signées en HMAC-SHA256 ; les webhooks sont vérifiés par leur signature HMAC-SHA512 (`x-bitnob-signature`, `BITNOB_WEBHOOK_SECRET`). Les numéros de versement sont vérifiés par un code WhatsApp avant tout envoi. Tests : `tests/bitnob.test.ts` ; test réel contre la sandbox avec `RUN_BITNOB_SANDBOX=1`.
+
 ## Démarrer
 
 Il faut une base Postgres. En local, le plus simple est Docker :
@@ -33,6 +47,14 @@ Ouvrir http://localhost:3000.
 L'application passe par le pooler ; les migrations passent par `DIRECT_URL`, car le pooler en mode transaction ne les supporte pas.
 
 Par défaut, `PAYMENT_PROVIDER=mock` : les factures et les versements sont simulés. Le tableau de bord affiche alors un bouton « Simuler le paiement » pour chaque membre.
+
+## Démo
+
+```bash
+npm run demo:reset
+```
+
+Recrée la « Tontine du quartier » : 4 membres aux numéros vérifiés, 10 000 FCFA par tour, tour 1 pour Fatou, tout le monde a payé sauf Ibrahima. Le script affiche le lien de la tontine (connecté en Awa, `+221770000001` / `natt2026`) et celui de la page de paiement d'Ibrahima. Il ne tourne qu'en mode simulé et sur une base locale (`127.0.0.1` ou `localhost`).
 
 ## Fonctionnalités
 

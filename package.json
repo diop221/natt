@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:migrate": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres:natt@127.0.0.1:54329/natt_test} DIRECT_URL=${TEST_DATABASE_URL:-postgresql://postgres:natt@127.0.0.1:54329/natt_test} prisma migrate deploy"
+    "test:migrate": "DATABASE_URL=${TEST_DATABASE_URL:-postgresql://postgres:natt@127.0.0.1:54329/natt_test} DIRECT_URL=${TEST_DATABASE_URL:-postgresql://postgres:natt@127.0.0.1:54329/natt_test} prisma migrate deploy",
+    "demo:reset": "tsx scripts/demo-reset.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -30,7 +31,9 @@
     "eslint-config-next": "15.5.27",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.19.2",
     "typescript": "^5",
     "vitest": "^3.2.7"
-  }
+  },
+  "license": "MIT"
 }
